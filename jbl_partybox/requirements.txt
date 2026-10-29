@@ -1,0 +1,4 @@
+bleak==3.0.2
+aiohttp==3.14.5
+dbus-fast==5.2.0; sys_platform == "linux"
+aiomqtt==2.5.1

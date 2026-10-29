@@ -1,0 +1,9 @@
+# JBL's APKs and the decompiled app are copyrighted; keep them local
+*.apk
+decompiled/
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+.claude/

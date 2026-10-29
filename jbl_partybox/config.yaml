@@ -1,0 +1,35 @@
+name: JBL PartyBox
+version: "1.0.0"
+slug: jbl_partybox
+url: https://github.com/BaggaBruh/jbl-partybox-ha
+description: Control JBL PartyBox speakers over Bluetooth
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: application
+boot: auto
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:speaker
+panel_title: PartyBox
+host_dbus: true
+host_network: true
+services:
+  - mqtt:want
+options:
+  auto_connect: true
+  heartbeat_interval: 5
+  scan_timeout: 8
+  mqtt_discovery: true
+  discovery_prefix: homeassistant
+schema:
+  auto_connect: bool
+  heartbeat_interval: int(1,60)
+  scan_timeout: int(3,30)
+  mqtt_discovery: bool
+  discovery_prefix: str
+  mqtt_host: str?
+  mqtt_port: port?
+  mqtt_username: str?
+  mqtt_password: password?

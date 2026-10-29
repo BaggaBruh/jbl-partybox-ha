@@ -1,0 +1,3 @@
+# Runtime deps of the app plus the test broker. dbus-fast is only needed on Linux.
+-r jbl_partybox/requirements.txt
+amqtt==0.12.1

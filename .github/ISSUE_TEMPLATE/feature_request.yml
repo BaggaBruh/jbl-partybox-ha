@@ -1,0 +1,15 @@
+name: Feature request
+description: A control or behaviour you'd like to see
+labels: [enhancement]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Speaker model
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like?
+      description: If the JBL app can do it, say where in the app; that helps find the command.
+    validations:
+      required: true

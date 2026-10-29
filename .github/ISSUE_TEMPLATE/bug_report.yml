@@ -1,0 +1,42 @@
+name: Bug report
+description: Something doesn't work with your speaker or Home Assistant
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! The **Debug** log from the PartyBox panel is the most useful thing
+        you can add: it shows every frame and connection event.
+        Feel free to replace your speaker's MAC address in it.
+  - type: input
+    id: model
+    attributes:
+      label: Speaker model
+      placeholder: e.g. PartyBox 310, PartyBox Encore
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Settings → Apps → JBL PartyBox
+      placeholder: e.g. 0.4.3
+    validations:
+      required: true
+  - type: input
+    id: ha
+    attributes:
+      label: Home Assistant install and Bluetooth adapter
+      placeholder: e.g. HA OS 16.2 on a Raspberry Pi 5, built-in Bluetooth
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Debug log
+      description: From the bottom of the PartyBox panel, covering the problem.
+      render: text

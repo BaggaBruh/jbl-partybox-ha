@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PartyBox</title>
+<style>
+  :root {
+    --bg: #f4f4f6; --card: #ffffff; --text: #17171c; --muted: #6b6b76; --line: #e3e3e8;
+    --accent: #ff6b00; --accent-soft: #fff0e5; --ok: #1e9e5a; --err: #d23c3c; --chip: #ededf1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101014; --card: #1b1b21; --text: #f1f1f4; --muted: #9a9aa6; --line: #2c2c35;
+      --accent: #ff7a1a; --accent-soft: #33200f; --chip: #26262e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 16px; max-width: 960px; margin: 0 auto; }
+  header h1 { font-size: 20px; margin: 0; flex: 1; }
+  .pill { font-size: 12px; padding: 4px 10px; border-radius: 99px; background: var(--chip); color: var(--muted); }
+  .pill.connected { background: #1e9e5a22; color: var(--ok); }
+  .pill.connecting { background: var(--accent-soft); color: var(--accent); }
+  main { max-width: 960px; margin: 0 auto; padding: 0 16px 32px; display: grid; gap: 16px;
+         grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  .wide { grid-column: 1 / -1; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--chip); color: var(--text);
+           border-radius: 10px; padding: 8px 14px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--err); }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+  .row label:not(.switch) { flex: 1; }
+  .devices { display: grid; gap: 8px; }
+  .device { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+  .device.active { border-color: var(--accent); background: var(--accent-soft); }
+  .device .meta { flex: 1; min-width: 0; }
+  .device .name { font-weight: 600; }
+  .device .sub { font-size: 12px; color: var(--muted); }
+  .empty { color: var(--muted); font-size: 14px; }
+  .now { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; }
+  .song { font-size: 18px; font-weight: 600; min-height: 1.4em; }
+  .artist { color: var(--muted); min-height: 1.4em; }
+  .transport { display: flex; gap: 12px; justify-content: center; margin: 12px 0 4px; }
+  .transport button { width: 52px; height: 52px; border-radius: 50%; padding: 0; font-size: 20px; }
+  .transport .play { width: 64px; height: 64px; background: var(--accent); border-color: var(--accent); color: #fff; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .vol { display: flex; align-items: center; gap: 10px; width: 100%; }
+  .vol output { min-width: 2.5em; text-align: right; font-variant-numeric: tabular-nums; }
+  .seg { display: flex; background: var(--chip); border-radius: 10px; padding: 3px; gap: 3px; }
+  .seg button { flex: 1; border: 0; background: transparent; padding: 6px 8px; }
+  .seg button.on { background: var(--card); color: var(--accent); font-weight: 600; box-shadow: 0 1px 2px #0002; }
+  .switch { position: relative; width: 44px; height: 26px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch span { position: absolute; inset: 0; background: var(--line); border-radius: 99px; transition: .15s; cursor: pointer; }
+  .switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: .15s; }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { transform: translateX(18px); }
+  .eq { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; text-align: center; }
+  .eq input { writing-mode: vertical-lr; direction: rtl; width: 32px; height: 120px; }
+  .eq .lbl { font-size: 12px; color: var(--muted); }
+  .patterns { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; }
+  .patterns button.on { border-color: var(--accent); color: var(--accent); }
+  .info { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
+  .info dt { color: var(--muted); }
+  .info dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  input[type=text] { font: inherit; flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px;
+                     border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .log { font: 12px/1.5 ui-monospace, Consolas, monospace; max-height: 260px; overflow: auto; background: var(--bg);
+         border-radius: 10px; padding: 8px; white-space: pre-wrap; }
+  .log .tx { color: var(--accent); } .log .rx { color: var(--ok); } .log .err { color: var(--err); } .log .info { color: var(--muted); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .disabled { opacity: .45; pointer-events: none; }
+  .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--err); color: #fff;
+           padding: 10px 16px; border-radius: 10px; font-size: 14px; display: none; max-width: calc(100% - 32px); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">PartyBox</h1>
+  <span id="status" class="pill">disconnected</span>
+</header>
+
+<main>
+  <section class="card wide">
+    <h2>Speakers</h2>
+    <div class="row">
+      <button id="scan" class="primary">Scan</button>
+      <button id="disconnect" class="danger" hidden>Disconnect</button>
+      <span id="scanmsg" class="empty"></span>
+    </div>
+    <div id="devices" class="devices"><div class="empty">Press Scan to find nearby PartyBox speakers.</div></div>
+  </section>
+
+  <section class="card ctl">
+    <h2>Now playing</h2>
+    <div class="now">
+      <div class="song" id="song"></div>
+      <div class="artist" id="artist"></div>
+      <div class="transport">
+        <button data-act="prev" title="Previous">&#9198;</button>
+        <button class="play" id="playpause" title="Play/Pause">&#9654;</button>
+        <button data-act="next" title="Next">&#9197;</button>
+      </div>
+      <div class="vol">
+        <button id="mute" title="Mute">&#128266;</button>
+        <input type="range" id="volume" min="0" max="32" value="0">
+        <output id="volout">0</output>
+      </div>
+    </div>
+  </section>
+
+  <section class="card ctl">
+    <h2>Sound</h2>
+    <div class="row"><label>Bass boost</label></div>
+    <div class="seg" id="bass">
+      <button data-v="0">Off</button><button data-v="1">Boost 1</button><button data-v="2">Boost 2</button>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <label>Custom EQ</label>
+      <label class="switch"><input type="checkbox" id="eqon"><span></span></label>
+    </div>
+    <div class="eq" id="eq">
+      <div><input type="range" min="-2" max="2" step="1" value="0" data-band="bass"><div class="lbl">Bass <b></b></div></div>
+      <div><input type="range" min="-2" max="2" step="1" value="0" data-band="mid"><div class="lbl">Mid <b></b></div></div>
+      <div><input type="range" min="-2" max="2" step="1" value="0" data-band="treble"><div class="lbl">Treble <b></b></div></div>
+    </div>
+  </section>
+
+  <section class="card ctl">
+    <h2>Light show</h2>
+    <div class="row">
+      <label>Lights</label>
+      <label class="switch"><input type="checkbox" id="light"><span></span></label>
+    </div>
+    <div class="patterns" id="patterns"></div>
+    <div class="row">
+      <label>Color</label>
+      <input type="color" id="color" value="#ff6b00">
+    </div>
+  </section>
+
+  <section class="card ctl">
+    <h2>Speaker</h2>
+    <dl class="info" id="info"></dl>
+    <div class="row">
+      <label>Feedback tones</label>
+      <label class="switch"><input type="checkbox" data-toggle="feedback_tone"><span></span></label>
+    </div>
+    <div class="row">
+      <label>Volume boost</label>
+      <label class="switch"><input type="checkbox" data-toggle="volume_boost"><span></span></label>
+    </div>
+    <div class="row">
+      <label>Lock top panel</label>
+      <label class="switch"><input type="checkbox" data-toggle="lock_panel"><span></span></label>
+    </div>
+    <div class="row">
+      <input type="text" id="name" maxlength="16" placeholder="Speaker name">
+      <button id="rename">Rename</button>
+    </div>
+    <div class="row">
+      <button data-act="refresh">Refresh</button>
+      <button id="poweroff" class="danger">Power off</button>
+    </div>
+  </section>
+
+  <section class="card wide">
+    <details>
+      <summary>Debug: raw commands &amp; packet log</summary>
+      <div class="row">
+        <input type="text" id="raw" placeholder="AA 41 00">
+        <button id="sendraw">Send</button>
+      </div>
+      <div class="log" id="log"></div>
+    </details>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+let snap = { status: "disconnected", state: {}, devices: [] };
+let meta = { light_patterns: {} };
+let dragging = false;
+
+async function api(path, body) {
+  const r = await fetch(path, { method: body === undefined ? "GET" : "POST",
+    headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const act = (action, value) => api("api/action", { action, value }).catch(toast);
+
+function toast(e) {
+  const t = $("#toast"); t.textContent = e.message || e; t.style.display = "block";
+  clearTimeout(toast.h); toast.h = setTimeout(() => (t.style.display = "none"), 4000);
+}
+
+function render() {
+  const s = snap.state || {}, connected = snap.status === "connected";
+  $("#status").textContent = snap.status; $("#status").className = "pill " + snap.status;
+  $("#title").textContent = s.name || "PartyBox";
+  $("#disconnect").hidden = !snap.address || snap.status === "disconnected";
+  $$(".ctl").forEach((el) => el.classList.toggle("disabled", !connected));
+
+  const list = $("#devices");
+  const devs = [...snap.devices];
+  if (snap.address && !devs.some((d) => d.address === snap.address))
+    devs.unshift({ address: snap.address, name: s.name || snap.address, rssi: null });
+  list.innerHTML = devs.length ? "" : '<div class="empty">No speakers found yet. Make sure the speaker is on and not connected to the JBL app.</div>';
+  for (const d of devs) {
+    const active = d.address === snap.address && snap.status !== "disconnected";
+    const el = document.createElement("div");
+    el.className = "device" + (active ? " active" : "");
+    el.innerHTML = `<div class="meta"><div class="name"></div><div class="sub"></div></div><button></button>`;
+    el.querySelector(".name").textContent = d.name;
+    el.querySelector(".sub").textContent = d.address + (d.rssi != null ? `  ·  ${d.rssi} dBm` : "");
+    const b = el.querySelector("button");
+    b.textContent = active ? snap.status : "Connect";
+    b.disabled = active;
+    if (!active) b.className = "primary";
+    b.onclick = () => api("api/connect", { address: d.address }).catch(toast);
+    list.appendChild(el);
+  }
+
+  $("#song").textContent = s.song || (connected ? "—" : "");
+  $("#artist").textContent = s.artist || "";
+  $("#playpause").innerHTML = s.player_status === "playing" ? "&#10074;&#10074;" : "&#9654;";
+  if (!dragging && s.volume != null) { $("#volume").value = s.volume; $("#volout").textContent = s.volume; }
+  $("#mute").innerHTML = s.muted ? "&#128263;" : "&#128266;";
+
+  $$("#bass button").forEach((b) => b.classList.toggle("on", +b.dataset.v === (s.bass_boost ?? -1)));
+  $("#eqon").checked = !!s.eq_enabled;
+  $$("#eq input").forEach((i) => {
+    const v = s["eq_" + i.dataset.band];
+    if (v != null && document.activeElement !== i) i.value = v;
+    i.parentElement.querySelector("b").textContent = (i.value > 0 ? "+" : "") + i.value;
+  });
+
+  $("#light").checked = !!s.light_on;
+  $$("#patterns button").forEach((b) => b.classList.toggle("on", +b.dataset.id === s.light_pattern));
+  $$("[data-toggle]").forEach((i) => (i.checked = !!s[i.dataset.toggle]));
+
+  const info = [
+    ["Battery", s.ac_powered ? "AC power" : s.battery != null ? `${s.battery}%${s.charging ? " (charging)" : ""}` : null],
+    ["Source", s.audio_source], ["Firmware", s.firmware], ["Product ID", s.product_id],
+    ["Model ID", s.model_id], ["Serial", s.serial], ["MAC", s.mac || snap.address],
+    ["Home Assistant", meta.mqtt],
+  ].filter(([, v]) => v != null && v !== "");
+  $("#info").innerHTML = "";
+  for (const [k, v] of info) {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v;
+    $("#info").append(dt, dd);
+  }
+  if (document.activeElement !== $("#name")) $("#name").value = s.name || "";
+}
+
+function addLog(e) {
+  const el = $("#log"), line = document.createElement("div");
+  const t = new Date(e.t * 1000).toLocaleTimeString();
+  line.className = e.dir;
+  line.textContent = `${t} ${e.dir.padEnd(4)} ${e.hex}${e.note ? "  " + e.note : ""}`;
+  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
+  el.appendChild(line);
+  while (el.childElementCount > 300) el.firstChild.remove();
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+function connectWs() {
+  const u = new URL("api/ws", location.href);
+  u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(u);
+  ws.onmessage = (m) => {
+    const ev = JSON.parse(m.data);
+    if (ev.type === "state") { snap = ev; render(); }
+    else if (ev.type === "log") addLog(ev.entry);
+  };
+  ws.onclose = () => setTimeout(connectWs, 2000);
+}
+
+// ---- Wiring ----
+$("#scan").onclick = async () => {
+  const b = $("#scan"); b.disabled = true; $("#scanmsg").textContent = "Scanning…";
+  try { const r = await api("api/scan", {}); $("#scanmsg").textContent = `${r.devices.length} found`; }
+  catch (e) { toast(e); $("#scanmsg").textContent = ""; }
+  b.disabled = false;
+};
+$("#disconnect").onclick = () => api("api/disconnect", {}).catch(toast);
+$$("[data-act]").forEach((b) => (b.onclick = () => act(b.dataset.act)));
+$("#playpause").onclick = () => act(snap.state.player_status === "playing" ? "pause" : "play");
+$("#mute").onclick = () => act("mute", !snap.state.muted);
+
+let volTimer;
+const vol = $("#volume");
+vol.oninput = () => {
+  dragging = true; $("#volout").textContent = vol.value;
+  clearTimeout(volTimer); volTimer = setTimeout(() => act("volume", +vol.value), 120);
+};
+vol.onchange = () => { dragging = false; clearTimeout(volTimer); act("volume", +vol.value); };
+
+$$("#bass button").forEach((b) => (b.onclick = () => act("bass_boost", +b.dataset.v)));
+const sendEq = () => {
+  const v = { enabled: $("#eqon").checked };
+  $$("#eq input").forEach((i) => (v[i.dataset.band] = +i.value));
+  act("eq", v);
+};
+$("#eqon").onchange = sendEq;
+$$("#eq input").forEach((i) => {
+  i.oninput = () => (i.parentElement.querySelector("b").textContent = (i.value > 0 ? "+" : "") + i.value);
+  i.onchange = () => { $("#eqon").checked = true; sendEq(); };
+});
+
+$("#light").onchange = (e) => act("light", e.target.checked);
+let colorTimer;
+$("#color").oninput = (e) => { clearTimeout(colorTimer); colorTimer = setTimeout(() => act("light_color", e.target.value), 150); };
+$$("[data-toggle]").forEach((i) => (i.onchange = () => act(i.dataset.toggle, i.checked)));
+$("#rename").onclick = () => { const n = $("#name").value.trim(); if (n) act("rename", n); };
+$("#poweroff").onclick = () => { if (confirm("Power off the speaker?")) act("power_off"); };
+$("#sendraw").onclick = () => { const v = $("#raw").value.trim(); if (v) act("raw", v); };
+$("#raw").onkeydown = (e) => { if (e.key === "Enter") $("#sendraw").click(); };
+
+(async () => {
+  try {
+    const st = await api("api/state");
+    meta = st.meta; snap = st;
+    const pg = $("#patterns");
+    for (const [id, name] of Object.entries(meta.light_patterns)) {
+      const b = document.createElement("button"); b.textContent = name; b.dataset.id = id;
+      b.onclick = () => act("light_pattern", +id);
+      pg.appendChild(b);
+    }
+    st.log.forEach(addLog);
+    render();
+  } catch (e) { toast(e); }
+  connectWs();
+})();
+</script>
+</body>
+</html>
