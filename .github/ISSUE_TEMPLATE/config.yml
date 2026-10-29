@@ -1,1 +1,8 @@
 blank_issues_enabled: true
+contact_links:
+  - name: 🔊 Tested models
+    url: https://github.com/BaggaBruh/jbl-partybox-ha/discussions/2
+    about: Report which PartyBox model you tried it on, working or not.
+  - name: ❓ Questions and setup help
+    url: https://github.com/BaggaBruh/jbl-partybox-ha/discussions/categories/q-a
+    about: Ask in Discussions instead of opening an issue.

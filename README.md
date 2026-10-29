@@ -156,6 +156,13 @@ Regenerating the decompiled APK is described in [tools/decompile](tools/decompil
 Bump `version` in [`jbl_partybox/config.yaml`](jbl_partybox/config.yaml) and add a
 [changelog](jbl_partybox/CHANGELOG.md) entry with every change.
 
+## Community
+
+- 🔊 **[Tested models](https://github.com/BaggaBruh/jbl-partybox-ha/discussions/2)**: tell others whether it works on your PartyBox
+- ❓ **[Q&A](https://github.com/BaggaBruh/jbl-partybox-ha/discussions/categories/q-a)**: questions and setup help
+- 💡 **[Ideas](https://github.com/BaggaBruh/jbl-partybox-ha/discussions/categories/ideas)**: controls or features you'd like
+- 🐞 **[Issues](https://github.com/BaggaBruh/jbl-partybox-ha/issues/new/choose)**: bugs, ideally with the panel's Debug log
+
 ## AI disclaimer
 
 This project was built with substantial help from an AI coding assistant (Anthropic's Claude,

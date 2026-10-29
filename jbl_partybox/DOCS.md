@@ -49,6 +49,10 @@ speaker, plus connection events, and lets you send raw frames such as `AA 41 00`
 - **A control does nothing:** not every model supports every command; the log shows whether the
   speaker acknowledged it (`ack … status 0`).
 
+Questions are welcome in [Discussions](https://github.com/BaggaBruh/jbl-partybox-ha/discussions);
+please add your speaker model to the
+[Tested models](https://github.com/BaggaBruh/jbl-partybox-ha/discussions/2) thread.
+
 ## Disclaimer
 
 This app was built with substantial AI assistance (Anthropic's Claude) from a reverse-engineered,
