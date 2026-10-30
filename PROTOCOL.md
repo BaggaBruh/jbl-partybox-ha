@@ -123,12 +123,20 @@ Patterns: 0 off, 1 Rock, 2 Neon, 3 Club, 4 Flow, 5 Ripple, 6 Cross, 7 Flash, 8 c
 | Rename (≤16 bytes UTF-8) | `AA 13 <len+3> <i> C1 <len> <name>` |
 | Lock top panel | `AA 13 04 <i> 55 01 <01/00>` |
 | Power off | `AA 03 01 04` |
-| Request feature info | `AA A1 00` → `AA A2 …` (not parsed) |
+| Request feature info | `AA A1 00` → `AA A2 …` (see below) |
 
 Device info (`AA 12 <len> <i>` + `<token> <len> <value>`, verified format): `31` product id,
 `32` model id, `33` battery (bit 7 charging, bits 0–6 percent, `F0` = mains without battery),
 `36` audio source (0 none, 1 Bluetooth, 2 aux, 3 USB, 4 optical, 7 USB audio), `37` MAC,
 `40` serial, `41` firmware, `44` settings CRC (also in the BLE advertisement), `C1` name.
+
+Feature info (`AA A2 <len>` + `<token> <len> <value>`, no device index; from
+`ReqDevFeatureInfoCommand`, not yet seen on real hardware): `A1` version, `A2` TWS volume, `A3` user
+EQ, `A5` feedback tone, `A6` PartyLight stage, `A8` cross TWS, `AD` volume boost, `AE` lock top panel,
+`AF` tone shifter, `B0` LE Audio. Value `01` means supported.
+
+The app also has a per-model table (`assets/ProductListConfig.json`, keyed by product id) with flags
+such as `supportPowerOff` and `supportSetDeviceName`. `protocol.PRODUCTS` holds the relevant part.
 
 ### Unsolicited frames seen
 

@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 import uuid
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fastclock  # noqa: E402,F401
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "jbl_partybox" / "app"))
 import att  # noqa: E402
 import protocol as p  # noqa: E402
@@ -76,6 +78,8 @@ async def speaker(sock, answered):
                 return
             deadline = loop.time() + 3600
             continue
+        if not pdu:  # we closed the link
+            return
         op = pdu[0]
         if op in (att.MTU_RSP, att.ERROR_RSP) and len(answered) < 2:
             answered.append(pdu.hex(" "))
@@ -115,7 +119,10 @@ async def main():
     print("notifications:", [g.hex(" ") for g in got])
     for e in events:
         print("event:", e)
+    assert link.is_connected and not closed, "link dropped"
+    assert len(answered) == 2, answered
+    assert got, "no notification"
     await link.close()
 
 
-asyncio.run(main())
+fastclock.run(main())

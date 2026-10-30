@@ -5,6 +5,8 @@ import tempfile
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fastclock  # noqa: E402,F401
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "jbl_partybox" / "app"))
 import bluez  # noqa: E402
 import speaker  # noqa: E402
@@ -104,7 +106,7 @@ def run(autolink, off_for=20, startup=False):
         await m.disconnect()
         return took, log
 
-    return asyncio.run(main())
+    return fastclock.run(main())
 
 
 for name, kw in [("power-on, speaker auto-links", dict(autolink=True)),
@@ -112,3 +114,5 @@ for name, kw in [("power-on, speaker auto-links", dict(autolink=True)),
                  ("app start, speaker already linked", dict(autolink=True, startup=True))]:
     took, log = run(**kw)
     print(f"{name:34s} stable after {took:5.1f} s   {log}")
+    assert took < 15, f"{name}: took {took:.1f} s"
+    assert log[-1][1] == "att on host", f"{name}: {log}"

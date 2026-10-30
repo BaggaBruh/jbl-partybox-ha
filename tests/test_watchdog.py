@@ -5,6 +5,8 @@ import tempfile
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fastclock  # noqa: E402,F401
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "jbl_partybox" / "app"))
 import bluez  # noqa: E402
 import speaker  # noqa: E402
@@ -55,7 +57,9 @@ async def main():
     await asyncio.sleep(12)
     print("opens at", opens, "| probes sent:", sum(1 for s in sent if s == "aa 41 00"))
     print([e["note"] for e in m.log if "reconnecting" in e["note"]])
+    assert len(opens) >= 2, opens
+    assert any(s == "aa 41 00" for s in sent), "no probe sent"
     await m.disconnect()
 
 
-asyncio.run(main())
+fastclock.run(main())

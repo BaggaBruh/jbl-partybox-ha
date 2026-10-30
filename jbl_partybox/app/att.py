@@ -42,12 +42,17 @@ def _uuid_from_le(b):
     return str(uuid.UUID(bytes=bytes(reversed(b))))
 
 
+source_address = None  # local adapter to connect from; None lets the kernel choose
+
+
 def open_l2cap_socket():
     try:
         sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
     except (AttributeError, OSError) as e:
         raise AttError(f"L2CAP sockets unavailable ({e}); the app needs host_network") from e
     sock.setblocking(False)
+    if source_address:
+        sock.bind((source_address, 0))
     return sock
 
 

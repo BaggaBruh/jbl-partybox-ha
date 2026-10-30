@@ -57,6 +57,7 @@ async def main():
 
         await collect(2)
         print("bridge status:", bridge.status)
+        assert bridge.status.startswith("connected"), bridge.status
         configs = sorted(t for t in seen if t.endswith("/config"))
         print(f"{len(configs)} discovery configs:")
         for t in configs:
@@ -83,12 +84,25 @@ async def main():
         await collect(2)
         print("actions:", actions)
         print("state volume after command:", json.loads(seen[f"{base}/state"])["volume"])
+        assert ("volume", 20) in actions and ("prev", None) in actions, actions
+        assert ("volume", 5) not in actions, "command for another speaker was accepted"
+        assert json.loads(seen[f"{base}/state"])["volume"] == 20
+        assert seen[f"{base}/connected"] == "ON"
+
+        # The speaker reports it has no custom EQ -> its entities are removed again
+        assert seen["homeassistant/number/partybox_123456789abc/eq_bass/config"]
+        mgr.state["features"] = {"eq": False}
+        await mgr._emit_state()
+        await collect(1)
+        assert seen["homeassistant/number/partybox_123456789abc/eq_bass/config"] == ""
+        assert seen["homeassistant/switch/partybox_123456789abc/eq/config"] == ""
 
         # speaker disconnects -> entities unavailable, connectivity OFF
         mgr.status = "disconnected"
         await mgr._emit_state()
         await collect(1)
         print("after disconnect: connected", seen[f"{base}/connected"], "availability", seen[f"{base}/availability"])
+        assert seen[f"{base}/connected"] == "OFF" and seen[f"{base}/availability"] == "offline"
 
     task.cancel()
     await broker.shutdown()

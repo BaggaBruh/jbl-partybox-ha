@@ -3,6 +3,8 @@ import asyncio
 import collections
 import json
 import logging
+import math
+import os
 import time
 from pathlib import Path
 
@@ -22,9 +24,14 @@ PAGE_RETRY_SECONDS = 1  # gap between host connect attempts while the speaker is
 RELINK_TIMEOUT_SECONDS = 12  # a host connect to a speaker that's off otherwise hangs ~30 s
 FALLBACK_EVERY = 6  # every Nth failed attempt is a plain connect (incl. BLE) instead
 WATCHDOG_SECONDS = 30  # silence before probing the speaker; twice this and the link is dropped
+AUTO_HOLD_SECONDS = 120  # auto-connect stays paused this long after a scan or failed manual connect
+BACK_TO_TARGET_SECONDS = 60  # retry a dropped speaker this long, then return to the auto-connect speaker
+PAIR_TIMEOUT_SECONDS = 30
+HEALTH_SECONDS = 30  # how often to re-check the Bluetooth adapters
 
 INITIAL_QUERIES = [
     p.req_device_info,
+    p.req_feature_info,
     p.req_player_info,
     p.req_battery,
     p.req_bass_boost,
@@ -37,14 +44,17 @@ class SpeakerManager:
     def __init__(self, heartbeat_interval=5, scan_timeout=8, auto_connect=True):
         self.heartbeat_interval = heartbeat_interval
         self.scan_timeout = scan_timeout
-        self.auto_connect = auto_connect
         self.client = None  # BleakClient when connected over GATT
         self.link = None  # att.AttLink when connected over classic Bluetooth
         self.transport = None  # "gatt" (BLE) | "att" (GATT over classic Bluetooth)
         self.address = None
         self.status = "disconnected"  # disconnected | connecting | connected
         self.state = {}
-        self.devices = {}  # address -> {name, rssi, last_seen}
+        self.devices = {}  # last scan's results: address -> {name, rssi, last_seen}
+        self.paired = {}  # speaker-like devices paired in BlueZ: address -> {name, partybox}
+        self.scanning = False
+        self.pairing = None  # address being paired
+        self.health = {"error": None, "adapters": []}
         self.log = collections.deque(maxlen=300)
         self.listeners = set()  # async callables(event: dict)
         self._reader = p.FrameReader()
@@ -53,10 +63,28 @@ class SpeakerManager:
         self._write_lock = asyncio.Lock()
         self._heartbeat_task = None
         self._reconnect_task = None
+        self._connect_task = None  # a connect the user asked for
+        self._resume_task = None
+        self._paused_until = 0.0
+        self._paging = None  # address with a host connect in flight in BlueZ
         self._user_disconnect = False
         self._connected_at = None
         self._last_rx = 0.0
         self._dropped_at = None
+        saved = self.load_last_info()
+        self._last = saved.get("address")
+        self.known = saved.get("known") or {}  # address -> {name, transport, last_connected}
+        if self._last and self._last not in self.known:  # file from before 1.1.0
+            self.known[self._last] = {"name": self._last, "transport": saved.get("transport"), "last_connected": None}
+        self.autoconnect = saved.get("autoconnect") or ("last" if auto_connect else "off")  # last | off | address
+        bluez.adapter = saved.get("adapter")
+
+    @property
+    def auto_connect(self):
+        return self.autoconnect != "off"
+
+    def autoconnect_target(self):
+        return {"off": None, "last": self._last}.get(self.autoconnect, self.autoconnect)
 
     # ---- Events ----
 
@@ -65,8 +93,95 @@ class SpeakerManager:
             "status": self.status,
             "address": self.address,
             "state": self.state,
-            "devices": sorted(self.devices.values(), key=lambda d: -(d["rssi"] or -999)),
+            "devices": self._device_list(),
+            "scanning": self.scanning,
+            "reconnecting": bool(self._reconnect_task and not self._reconnect_task.done()),
+            "autoconnect": self.autoconnect,
+            "auto_target": self.autoconnect_target(),
+            "auto_paused": self._pause_remaining(),
+            "pairing": self.pairing,
+            "capabilities": p.capabilities(self.state),
+            "bluetooth": {**self.health, "selected": bluez.adapter, **self._bluetooth_problem()},
         }
+
+    def _bluetooth_problem(self):
+        """What keeps Bluetooth from working, for the panel; `fix` is an adapter it can switch on."""
+        adapters = self.health["adapters"]
+        if self.health["error"]:
+            return {"problem": f"Bluetooth isn't working: {self.health['error']}.", "fix": None}
+        if not adapters:
+            return {"problem": "No Bluetooth adapter found on the Home Assistant host.", "fix": None}
+        if bluez.adapter:
+            chosen = next((a for a in adapters if a["id"] == bluez.adapter), None)
+            if not chosen:
+                return {"problem": f"The selected Bluetooth adapter ({bluez.adapter}) isn't plugged in.", "fix": None}
+        else:
+            chosen = adapters[0]
+        if not chosen["powered"]:
+            return {"problem": f"Bluetooth adapter {chosen['id']} is switched off.", "fix": chosen["id"]}
+        return {"problem": None, "fix": None}
+
+    async def refresh_health(self):
+        found = await _safe(bluez.health())
+        if isinstance(found, str):
+            found = {"error": found, "adapters": []}
+        chosen = next((a for a in found["adapters"] if a["id"] == bluez.adapter), None)
+        att.source_address = chosen["address"] if chosen else None
+        if found != self.health:
+            self.health = found
+            await self._emit_state()
+
+    async def health_loop(self):
+        while True:
+            await asyncio.sleep(HEALTH_SECONDS)
+            await self.refresh_health()
+
+    async def power_adapter(self, adapter_id):
+        err = await bluez.set_powered(adapter_id)
+        await self.refresh_health()
+        if err:
+            raise ValueError(f"couldn't switch on {adapter_id}: {err}")
+
+    async def set_adapter(self, adapter_id):
+        """adapter_id is an id from the health check, or None for automatic."""
+        if adapter_id and not any(a["id"] == adapter_id for a in self.health["adapters"]):
+            raise ValueError(f"unknown adapter {adapter_id}")
+        if adapter_id == bluez.adapter:
+            return
+        was_disconnected = self._user_disconnect
+        await self.disconnect()  # the link belongs to the old adapter
+        self._user_disconnect = was_disconnected
+        bluez.adapter = adapter_id
+        self.devices, self.paired = {}, {}
+        self._save()
+        await self.refresh_health()
+        await self.refresh_paired()
+        self._start_auto()
+        await self._emit_state()
+
+    def _device_list(self):
+        """Everything selectable: remembered, paired in BlueZ, or found by the last scan."""
+        merged = {}
+        for address, d in self.paired.items():
+            merged[address] = {"address": address, "name": d["name"], "paired": True, "partybox": d["partybox"]}
+        for address, d in self.devices.items():
+            merged.setdefault(address, {"address": address, "name": d["name"]}).update(
+                name=d["name"], rssi=d["rssi"], ble=d.get("ble", True),
+                partybox=d.get("partybox", True) or merged.get(address, {}).get("partybox", False))
+        for address, d in self.known.items():
+            merged.setdefault(address, {"address": address}).update(
+                name=d["name"], known=True, partybox=True, last_connected=d.get("last_connected"))
+        if self.address:
+            current = merged.setdefault(self.address, {"address": self.address, "name": self.address})
+            current["name"] = self.state.get("name") or current["name"]
+        target = self.autoconnect_target()
+        return sorted(
+            ({"rssi": None, "known": False, "paired": False, "partybox": False, "ble": False,
+              "last_connected": None, **d}
+             for d in merged.values()),
+            key=lambda d: (d["address"] != self.address, d["address"] != target, not d["known"],
+                           -(d["last_connected"] or 0), -(d["rssi"] or -999), d["name"].lower()),
+        )
 
     async def _emit(self, event):
         for cb in list(self.listeners):
@@ -86,17 +201,47 @@ class SpeakerManager:
     # ---- Scanning ----
 
     async def scan(self):
-        found = await BleakScanner.discover(timeout=self.scan_timeout, return_adv=True)
+        # BlueZ can't reliably scan while it's paging a speaker, and the user is about to pick one,
+        # so stop whatever is connecting and keep auto-connect out of the way for a while.
+        if not self.scanning:
+            await self._stop_connecting()
+            self._hold_auto()
+            self.scanning = True
+            await self._emit_state()
+            try:
+                self.devices = await self._discover()
+                await self.refresh_paired()
+            finally:
+                self.scanning = False
+                self._hold_auto()
+                await self._emit_state()
+        return [d for d in self._device_list() if d["rssi"] is not None]
+
+    async def refresh_paired(self):
+        found = await _safe(bluez.paired_devices(p.ADV_SERVICE_UUIDS | {p.SERVICE_UUID}))
+        if isinstance(found, list):
+            self.paired = {d["address"]: d for d in found}
+
+    async def _discover(self):
+        devices = {}
+        uuids_wanted = p.ADV_SERVICE_UUIDS | {p.SERVICE_UUID}
+        found, nearby = await asyncio.gather(
+            BleakScanner.discover(timeout=self.scan_timeout, return_adv=True, **_bleak_args()),
+            _safe(bluez.discover_nearby(self.scan_timeout, uuids_wanted)),
+        )
         for dev, adv in found.values():
             uuids = {u.lower() for u in adv.service_uuids} | {u.lower() for u in adv.service_data}
             name = dev.name or adv.local_name or ""
             if uuids & p.ADV_SERVICE_UUIDS or "partybox" in name.lower() or p.SERVICE_UUID in uuids:
-                self.devices[dev.address] = {
+                devices[dev.address] = {
                     "address": dev.address, "name": name or dev.address,
                     "rssi": adv.rssi, "last_seen": time.time(),
                 }
-        await self._emit_state()
-        return self.snapshot()["devices"]
+        if isinstance(nearby, list):
+            for d in nearby:
+                if d["address"] not in devices:
+                    devices[d["address"]] = {**d, "ble": False, "last_seen": time.time()}
+        return devices
 
     # ---- Connection ----
 
@@ -104,6 +249,75 @@ class SpeakerManager:
         if self.transport == "att":
             return bool(self.link and self.link.is_connected)
         return bool(self.client and self.client.is_connected)
+
+    async def connect_to(self, address, pair=False):
+        """The user picked a speaker: this overrides any attempt in progress. False if superseded."""
+        await self._stop_connecting()
+        task = asyncio.create_task(self._manual_connect(address, pair))
+        self._connect_task = task
+        try:
+            await task
+            return True
+        except asyncio.CancelledError:
+            if task.cancelled():
+                return False
+            raise
+
+    async def _manual_connect(self, address, pair=False):
+        was_disconnected = self._user_disconnect
+        if self._link_up():
+            if self.address == address:
+                self._clear_hold()
+                await self._emit_state()
+                return
+            await self.disconnect()
+        self._hold_auto()
+        self._user_disconnect = False
+        self.address = address
+        self.status = "connecting"
+        self.state = {}
+        await self._emit_state()
+        try:
+            if pair:
+                self.pairing = address
+                await self._emit_state()
+                try:
+                    err = await _safe(bluez.pair(address, timeout=PAIR_TIMEOUT_SECONDS))
+                finally:
+                    self.pairing = None
+                if err:
+                    raise BleakError(f"pairing failed: {err}")
+                await self._log("info", b"", f"paired with {address}")
+                await self.refresh_paired()
+            # Same rule as the reconnect loop: the speaker only keeps our channel on a host-made link
+            st = await _safe(bluez.link_state(address))
+            if isinstance(st, dict) and (st["connected"] or self.known.get(address, {}).get("transport") == "att"):
+                err = await self._relink(address)
+                if err:
+                    await self._log("info", b"", f"re-linking speaker from the host: {err}")
+                else:
+                    await self._wait_for_audio(AUDIO_WAIT_SECONDS)
+                    await asyncio.sleep(SETTLE_SECONDS)
+            await self.connect(address)
+            if self.status != "connected":
+                raise BleakError("the speaker dropped the connection right away")
+        except Exception as e:
+            self._user_disconnect = was_disconnected
+            self.status = "disconnected"
+            self._hold_auto()
+            await self._log("err", b"", str(e))
+            await self._emit_state()
+            raise
+        self._clear_hold()
+        await self.refresh_paired()
+        await self._emit_state()
+
+    async def _relink(self, address):
+        self._paging = address
+        try:
+            return await _safe(bluez.relink(address, timeout=RELINK_TIMEOUT_SECONDS))
+        finally:
+            self._paging = None
 
     async def connect(self, address, ble_fallback=True):
         if self._link_up():
@@ -117,7 +331,7 @@ class SpeakerManager:
         await self._emit_state()
         try:
             opened = False
-            if self._load_last().get("transport") == "att":
+            if (self.known.get(address) or self._load_last()).get("transport") == "att":
                 try:
                     await self._open_att(address)
                     opened = True
@@ -154,10 +368,10 @@ class SpeakerManager:
         await self.refresh()
 
     async def _open(self, address):
-        device = await BleakScanner.find_device_by_address(address, timeout=self.scan_timeout)
+        device = await BleakScanner.find_device_by_address(address, timeout=self.scan_timeout, **_bleak_args())
         if device is None:
             raise BleakError(f"{address} not found; is it on and not connected to the JBL app?")
-        client = BleakClient(device, disconnected_callback=self._on_disconnect, timeout=30.0)
+        client = BleakClient(device, disconnected_callback=self._on_disconnect, timeout=30.0, **_bleak_args())
         await client.connect()
         self.client = client
         self.transport = "gatt"
@@ -214,6 +428,8 @@ class SpeakerManager:
 
     async def disconnect(self):
         self._user_disconnect = True
+        await self._stop_connecting()
+        self._clear_hold()
         self._cancel_tasks()
         await self._close_link()
         self.status = "disconnected"
@@ -249,11 +465,96 @@ class SpeakerManager:
         self._schedule_reconnect()
 
     def _schedule_reconnect(self):
-        if self._user_disconnect or not self.auto_connect or not self.address:
+        if self._user_disconnect or not self.auto_connect or not self.address or self._auto_paused():
             return
         if self._reconnect_task and not self._reconnect_task.done():
             return
         self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+
+    async def _stop_connecting(self):
+        """Force-stop reconnecting and connecting. An established connection is left alone."""
+        paging, pairing = self._paging, self.pairing
+        tasks = [t for t in (self._reconnect_task, self._connect_task)
+                 if t and not t.done() and t is not asyncio.current_task()]
+        for t in tasks:
+            t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        if paging:
+            # BlueZ keeps paging after the caller is gone and would bring the old speaker back
+            await _safe(asyncio.wait_for(bluez.disconnect(paging), 3))
+        if pairing:
+            await _safe(asyncio.wait_for(bluez.cancel_pairing(pairing), 3))
+        if self.status == "connecting":
+            await self._close_link()
+            self.status = "disconnected"
+            self.state = {}
+        if tasks:
+            await self._log("info", b"", "stopped the connection attempt in progress")
+            await self._emit_state()
+
+    def _auto_paused(self):
+        manual = self._connect_task and not self._connect_task.done()
+        return bool(manual) or time.monotonic() < self._paused_until
+
+    def _pause_remaining(self):
+        if self._user_disconnect or not self.auto_connect:
+            return 0
+        return math.ceil(max(0, self._paused_until - time.monotonic()))
+
+    def _hold_auto(self):
+        self._clear_hold()
+        self._paused_until = time.monotonic() + AUTO_HOLD_SECONDS
+        self._resume_task = asyncio.create_task(self._resume_after(AUTO_HOLD_SECONDS))
+
+    def _clear_hold(self):
+        self._paused_until = 0.0
+        if self._resume_task and self._resume_task is not asyncio.current_task():
+            self._resume_task.cancel()
+        self._resume_task = None
+
+    async def _resume_after(self, seconds):
+        await asyncio.sleep(seconds)
+        await self.resume_auto()
+
+    async def resume_auto(self):
+        self._clear_hold()
+        self._start_auto()
+        await self._emit_state()
+
+    def _start_auto(self):
+        target = self.autoconnect_target()
+        if target and self.status == "disconnected" and not self._user_disconnect:
+            self.address = target
+            self._schedule_reconnect()
+
+    async def set_autoconnect(self, value):
+        if value not in ("last", "off") and not any(d["address"] == value for d in self._device_list()):
+            raise ValueError(f"unknown speaker {value}")
+        self.autoconnect = value
+        self._save()
+        if value == "off":
+            if self._reconnect_task and not self._reconnect_task.done():
+                await self._stop_connecting()
+        else:
+            self._start_auto()
+        await self._emit_state()
+
+    async def forget(self, address):
+        if address == self.address and self.status != "disconnected":
+            raise ValueError("disconnect this speaker first")
+        if address == self.address:
+            await self._stop_connecting()
+            self.address = None
+        self.known.pop(address, None)
+        if self._last == address:
+            self._last = None
+        if self.autoconnect == address:
+            self.autoconnect = "last"
+        self._save()
+        if not self._auto_paused():
+            self._start_auto()
+        await self._emit_state()
 
     async def _reconnect_loop(self):
         # The speaker only keeps our control channel open on a link the host set up
@@ -261,12 +562,17 @@ class SpeakerManager:
         # closes the channel after ~5 s. So every reconnect (re)creates the link from the host:
         # immediately when the speaker links itself, otherwise by paging it every few seconds.
         # Every Nth failure also tries a plain connect, in case BlueZ can't be driven at all.
-        next_page = time.monotonic()
+        started = next_page = time.monotonic()
         failures = 0
         while not self._user_disconnect and self.status != "connected":
             await asyncio.sleep(POLL_SECONDS)
             if self.status == "connecting":
                 continue
+            target = self.autoconnect_target()
+            if target and target != self.address and time.monotonic() - started > BACK_TO_TARGET_SECONDS:
+                await self._log("info", b"", f"{self.address} is gone; going back to {target}")
+                self.address, started, failures = target, time.monotonic(), 0
+                await self._emit_state()
             st = await _safe(bluez.link_state(self.address))
             linked = isinstance(st, dict) and st["connected"]
             if not linked and time.monotonic() < next_page:
@@ -274,7 +580,7 @@ class SpeakerManager:
             if failures % FALLBACK_EVERY == FALLBACK_EVERY - 1:
                 await self._log("info", b"", "host re-link keeps failing; trying a direct connect")
             else:
-                err = await _safe(bluez.relink(self.address, timeout=RELINK_TIMEOUT_SECONDS))
+                err = await self._relink(self.address)
                 if err:
                     failures += 1
                     next_page = time.monotonic() + PAGE_RETRY_SECONDS
@@ -305,7 +611,7 @@ class SpeakerManager:
         return False
 
     def _cancel_tasks(self):
-        for t in (self._heartbeat_task, self._reconnect_task):
+        for t in (self._heartbeat_task, self._reconnect_task, self._connect_task):
             if t and not t.done() and t is not asyncio.current_task():
                 t.cancel()
 
@@ -387,6 +693,7 @@ class SpeakerManager:
             await self._log("rx", raw, note)
             if upd:
                 self.state.update(upd)
+                self._note_name()
                 changed = True
         if changed:
             await self._emit_state()
@@ -443,13 +750,38 @@ class SpeakerManager:
             await self.send(frame)
         if optimistic:
             s.update(optimistic)
+            self._note_name()
             await self._emit_state()
 
     # ---- Persistence ----
 
     def _save_last(self, address, transport):
+        self._last = address
+        self.known[address] = {
+            "name": self.device_name(address), "transport": transport, "last_connected": time.time(),
+        }
+        self._save()
+
+    def _note_name(self):
+        entry = self.known.get(self.address)
+        name = self.state.get("name")
+        if entry and name and entry["name"] != name:
+            entry["name"] = name
+            self._save()
+
+    def device_name(self, address):
+        for source in (self.known, self.devices, self.paired):
+            if address in source and source[address].get("name"):
+                return source[address]["name"]
+        return address
+
+    def _save(self):
+        data = {"address": self._last, "transport": self.known.get(self._last, {}).get("transport"),
+                "autoconnect": self.autoconnect, "adapter": bluez.adapter, "known": self.known}
         try:
-            STATE_FILE.write_text(json.dumps({"address": address, "transport": transport}))
+            tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+            tmp.write_text(json.dumps(data))
+            os.replace(tmp, STATE_FILE)
         except OSError:
             pass
 
@@ -478,6 +810,10 @@ async def _safe(coro):
         return await coro
     except Exception as e:
         return f"error: {e}"
+
+
+def _bleak_args():
+    return {"bluez": {"adapter": bluez.adapter}} if bluez.adapter else {}
 
 
 def _hex_rgb(value):

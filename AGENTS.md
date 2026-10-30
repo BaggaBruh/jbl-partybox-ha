@@ -23,9 +23,11 @@ discovery for automations. It's in daily use on the owner's HA OS install with t
 | `jbl_partybox/app/bluez.py` | BlueZ D-Bus helpers: device info/dump, link state, host-side relink |
 | `jbl_partybox/app/speaker.py` | `SpeakerManager`: connect, transports, reconnect loop, watchdog, actions, log |
 | `jbl_partybox/app/mqtt_bridge.py` | MQTT discovery entities + command handling |
+| `jbl_partybox/app/diagnostics.py` | Scrubbed report for bug reports (pure, tested) |
 | `jbl_partybox/app/server.py` | aiohttp: ingress UI, REST (`api/…`), WebSocket push, startup |
 | `jbl_partybox/app/static/index.html` | Single-file vanilla JS UI (relative URLs for ingress) |
-| `tests/` | Standalone simulation scripts (fakes for BlueZ/sockets/broker); run individually |
+| `tests/` | Simulation scripts with asserts; `run_all.py` runs them in parallel, `fastclock.py` simulates time |
+| `.github/workflows/tests.yml` | Runs `tests/run_all.py` on pushes and pull requests |
 | `tools/ble_test.py` | Direct bleak CLI test; `tools/mock_server.py [--demo]` UI with a fake speaker |
 | `tools/make_icons.py` | Regenerates `icon.png`/`logo.png` (Pillow, Windows fonts) |
 | `docs/` | README images: icon and light/dark screenshots (taken from `mock_server.py --demo`) |
@@ -48,13 +50,27 @@ discovery for automations. It's in daily use on the owner's HA OS install with t
 4. The speaker may send ATT *requests* to us on the same channel; `AttLink` must answer them
    (and only treat response opcodes as replies to its own requests).
 5. Watchdog: 30 s of silence → probe with `AA 41 00`; 60 s → drop and reconnect.
-6. The working transport ("gatt"/"att") is saved in `/data/last_device.json`.
+6. `/data/last_device.json` stores the last speaker, the auto-connect setting (`last`, `off` or an
+   address) and every speaker connected to before, with its working transport ("gatt"/"att").
+7. User actions beat auto-connect: `scan()` and `connect_to()` call `_stop_connecting()`, which
+   cancels the reconnect and manual tasks and aborts a BlueZ connect in flight with
+   `Device1.Disconnect`. `_hold_auto()` then pauses auto-connect for `AUTO_HOLD_SECONDS`; the pause
+   must always expire, or one forgotten scan would end auto reconnect for good.
 
 Dead ends already tried: SPP/RFCOMM (speaker answers `FAIL`), removing the device from BlueZ
 (doesn't force BLE), waiting longer before connecting on a speaker-created link (still dropped).
 
 ## Gotchas
 
+- Capabilities (`protocol.capabilities`) only hide a control on evidence: an explicit `0` in the
+  speaker's `AA A2` report, or the model table. A missing token keeps the control, because hiding
+  something that works is worse than offering something that doesn't.
+- `bluez.adapter` is the selected adapter. Every Device1 lookup must go through `_on_adapter`, and
+  `att.source_address` binds the L2CAP socket to it.
+- `diagnostics.py` must never let MAC addresses, names, serials or song titles through. Add a case
+  to `tests/test_features.py` when a new frame carries personal data.
+- Tests that import `fastclock` run on simulated time: `asyncio.sleep` returns at once, so use it
+  freely, and anything needing real time (the MQTT broker) must not import it.
 - `connect()` returns only after the initial queries (~1.5 s); a drop during that time must be
   retried by the reconnect loop, which checks `status` after `connect()` returns.
 - `_on_disconnect` ignores events unless `status == "connected"`; `connect()` handles its own failures.
@@ -71,8 +87,8 @@ Dead ends already tried: SPP/RFCOMM (speaker answers `FAIL`), removing the devic
 
 ## Working on it
 
-- Changes are verified with the simulation scripts in `tests/` (they monkeypatch BlueZ, sockets
-  and timings) and then by the owner on real hardware. Real Bluetooth can't run on Windows dev
+- Changes are verified with `python tests/run_all.py` (the scripts monkeypatch BlueZ, sockets and
+  timings) and then by the owner on real hardware. Real Bluetooth can't run on Windows dev
   machines; ask the owner for the panel's **Debug** log (every tx/rx frame plus connection
   events) when behaviour on the speaker matters.
 - Deploy: copy `jbl_partybox/` to `/addons/` on the HA host (Samba share `addons`), then

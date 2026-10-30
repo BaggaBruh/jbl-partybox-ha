@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.2.0
+
+- **Pair from the panel:** Scan also finds speakers in pairing mode, and **Pair and connect** pairs
+  and trusts them.
+- **Settings** menu (gear icon) with the Bluetooth adapter selector, the auto-connect setting and
+  a diagnostics download.
+- **Bluetooth health check:** the panel says when there's no adapter, BlueZ can't be reached or the
+  adapter is off, with a button to switch it on.
+- **Model capabilities:** the panel and MQTT only offer what your speaker supports, using the
+  speaker's own feature report and the model table from the JBL app. Shows the model name.
+- **Download diagnostics:** a report for bug reports with personal details removed.
+
+## 1.1.0
+
+- The panel lists speakers you connected to before and paired audio devices, not only scan results.
+- New **Auto-connect** setting in the panel: last used speaker, a specific speaker, or off.
+  It replaces the `auto_connect` option, whose value is used once as the starting point.
+- Scanning or pressing Connect force-stops auto-connect, including a Bluetooth connect in flight.
+  It stays paused for 2 minutes after a scan or failed connect, then resumes (or use **Resume now**).
+- A new Connect replaces one in progress; connections in progress can be cancelled.
+- A manual connect sets up the Bluetooth link from the host, like automatic reconnects.
+- If a speaker you switched to disappears, the app returns to the auto-connect speaker after 1 minute.
+- **Forget** removes a speaker from the panel's list (it stays paired in Bluetooth).
+
 ## 1.0.0: first public release
 
 - Control a JBL PartyBox from Home Assistant: volume, mute, playback, bass boost, custom EQ,

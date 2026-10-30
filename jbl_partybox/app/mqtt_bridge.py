@@ -80,6 +80,13 @@ ENTITIES = [
 ]
 
 
+# Entities that depend on a capability of the speaker (protocol.capabilities)
+ENTITY_CAPABILITY = {
+    "eq": "eq", "eq_bass": "eq", "eq_mid": "eq", "eq_treble": "eq", "feedback_tone": "feedback_tone",
+    "volume_boost": "volume_boost", "lock_panel": "lock_panel", "power_off": "power_off",
+}
+
+
 def _speaker_id(address):
     return address.replace(":", "").lower()
 
@@ -173,6 +180,8 @@ class MqttBridge:
         for other in self._known_ids - {sid}:
             await client.publish(f"{BASE}/{other}/availability", "offline", retain=True)
             await client.publish(f"{BASE}/{other}/connected", "OFF", retain=True)
+        if not connected and mgr.address not in mgr.known and sid not in self._known_ids:
+            return  # a speaker being tried for the first time isn't a Home Assistant device yet
         self._known_ids.add(sid)
 
         device = {
@@ -191,7 +200,14 @@ class MqttBridge:
             "state_topic": f"{base}/connected", "availability_topic": BRIDGE_STATUS, "device": device,
         }
         await self._discover(client, sid, "binary_sensor", "connected", connected_cfg)
+        caps = p.capabilities(state)
         for component, obj, cfg, action, needs in ENTITIES:
+            if not caps.get(ENTITY_CAPABILITY.get(obj), True):
+                # Discovery may already have gone out before the speaker reported its features
+                if (sid, obj, None) not in self._published:
+                    self._published = {k for k in self._published if k[:2] != (sid, obj)} | {(sid, obj, None)}
+                    await client.publish(f"{self.prefix}/{component}/partybox_{sid}/{obj}/config", "", retain=True)
+                continue
             if needs and needs not in state:
                 continue
             full = {**cfg, **availability, "unique_id": f"partybox_{sid}_{obj}", "device": device}
@@ -217,8 +233,8 @@ class MqttBridge:
         await client.publish(f"{self.prefix}/{component}/partybox_{sid}/{obj}/config", json.dumps(cfg), retain=True)
 
     def _device_name(self):
-        dev = self.mgr.devices.get(self.mgr.address) or {}
-        return dev.get("name") or f"PartyBox {self.mgr.address[-5:]}"
+        name = self.mgr.device_name(self.mgr.address)
+        return name if name != self.mgr.address else f"PartyBox {name[-5:]}"
 
     @staticmethod
     def _light_state(state):

@@ -5,9 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting! The **Debug** log from the PartyBox panel is the most useful thing
-        you can add: it shows every frame and connection event.
-        Feel free to replace your speaker's MAC address in it.
+        Thanks for reporting! The most useful thing you can add is the file from **Settings →
+        Download diagnostics** in the PartyBox panel: it has every frame and connection event,
+        with MAC addresses, names, serial numbers and song titles removed.
   - type: input
     id: model
     attributes:

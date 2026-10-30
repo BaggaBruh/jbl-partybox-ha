@@ -5,6 +5,8 @@ import tempfile
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fastclock  # noqa: E402,F401
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "jbl_partybox" / "app"))
 import bluez  # noqa: E402
 import speaker  # noqa: E402
@@ -70,7 +72,9 @@ async def main():
             break
     await asyncio.sleep(3)
     print(f"status {m.status}, attempts at {attempts}")
+    assert m.status == "connected", m.status
+    assert len(attempts) == 4, attempts
     await m.disconnect()
 
 
-asyncio.run(main())
+fastclock.run(main())

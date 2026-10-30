@@ -41,7 +41,37 @@
   .device.active { border-color: var(--accent); background: var(--accent-soft); }
   .device .meta { flex: 1; min-width: 0; }
   .device .name { font-weight: 600; }
-  .device .sub { font-size: 12px; color: var(--muted); }
+  .device .sub { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .device .actions { display: flex; gap: 6px; flex: none; }
+  .device .name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .tag { font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: 99px; background: var(--chip); color: var(--muted); }
+  .tag.auto { background: var(--accent-soft); color: var(--accent); }
+  .device.active .tag.auto { background: var(--card); }
+  .link { border: 0; background: none; color: var(--muted); padding: 8px 6px; }
+  .link:hover { color: var(--text); }
+  .setting { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+  .setting select { font: inherit; flex: 1 1 200px; min-width: 0; max-width: 360px; padding: 8px 10px; border-radius: 10px;
+                    border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .notice { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 8px 12px; margin: 12px 0; border-radius: 12px;
+            background: var(--accent-soft); font-size: 14px; }
+  .notice[hidden] { display: none; }
+  .notice.bad { background: #d23c3c22; }
+  [data-cap][hidden] { display: none; }
+  header button { padding: 4px 10px; }
+  dialog { border: 1px solid var(--line); border-radius: 16px; background: var(--card); color: var(--text);
+           width: min(480px, calc(100% - 32px)); padding: 16px; }
+  dialog::backdrop { background: #0007; }
+  dialog h2 { font-size: 18px; margin: 0 0 12px; }
+  dialog .field { display: grid; gap: 6px; margin: 16px 0; }
+  dialog .hint { font-size: 12px; color: var(--muted); }
+  dialog select { font: inherit; width: 100%; padding: 8px 10px; border-radius: 10px;
+                  border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  dialog .foot { display: flex; justify-content: flex-end; }
+  a.button { display: inline-block; font: inherit; color: var(--text); text-decoration: none; border: 1px solid var(--line);
+             background: var(--chip); border-radius: 10px; padding: 8px 14px; justify-self: start; }
+  a.button:hover { border-color: var(--accent); }
+  .notice span { flex: 1 1 200px; }
+  .notice button { padding: 4px 12px; }
   .empty { color: var(--muted); font-size: 14px; }
   .now { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; }
   .song { font-size: 18px; font-weight: 600; min-height: 1.4em; }
@@ -84,7 +114,27 @@
 <header>
   <h1 id="title">PartyBox</h1>
   <span id="status" class="pill">disconnected</span>
+  <button id="opensettings" title="Settings" aria-label="Settings">&#9881;</button>
 </header>
+
+<dialog id="settings">
+  <h2>Settings</h2>
+  <div class="field">
+    <label for="adapter">Bluetooth adapter</label>
+    <select id="adapter"></select>
+    <div class="hint">Changing it disconnects the speaker. Speakers have to be paired on the adapter you use.</div>
+  </div>
+  <div class="field">
+    <label for="autoconnect">Auto-connect to</label>
+    <select id="autoconnect"></select>
+  </div>
+  <div class="field">
+    <label>Diagnostics</label>
+    <a class="button" href="api/diagnostics" download="partybox-diagnostics.json">Download diagnostics</a>
+    <div class="hint">For bug reports. MAC addresses, names, serial numbers and song titles are removed.</div>
+  </div>
+  <div class="foot"><button id="closesettings">Close</button></div>
+</dialog>
 
 <main>
   <section class="card wide">
@@ -94,7 +144,16 @@
       <button id="disconnect" class="danger" hidden>Disconnect</button>
       <span id="scanmsg" class="empty"></span>
     </div>
-    <div id="devices" class="devices"><div class="empty">Press Scan to find nearby PartyBox speakers.</div></div>
+    <div class="notice bad" id="health" hidden>
+      <span id="healthmsg"></span>
+      <button id="healthfix">Switch on</button>
+    </div>
+    <div class="notice" id="paused" hidden>
+      <span id="pausedmsg"></span>
+      <button id="resume">Resume now</button>
+    </div>
+    <div id="devices" class="devices"></div>
+    <p class="empty">New speaker? Put it in Bluetooth pairing mode, then press Scan.</p>
   </section>
 
   <section class="card ctl">
@@ -121,11 +180,11 @@
     <div class="seg" id="bass">
       <button data-v="0">Off</button><button data-v="1">Boost 1</button><button data-v="2">Boost 2</button>
     </div>
-    <div class="row" style="margin-top:16px">
+    <div class="row" style="margin-top:16px" data-cap="eq">
       <label>Custom EQ</label>
       <label class="switch"><input type="checkbox" id="eqon"><span></span></label>
     </div>
-    <div class="eq" id="eq">
+    <div class="eq" id="eq" data-cap="eq">
       <div><input type="range" min="-2" max="2" step="1" value="0" data-band="bass"><div class="lbl">Bass <b></b></div></div>
       <div><input type="range" min="-2" max="2" step="1" value="0" data-band="mid"><div class="lbl">Mid <b></b></div></div>
       <div><input type="range" min="-2" max="2" step="1" value="0" data-band="treble"><div class="lbl">Treble <b></b></div></div>
@@ -148,25 +207,25 @@
   <section class="card ctl">
     <h2>Speaker</h2>
     <dl class="info" id="info"></dl>
-    <div class="row">
+    <div class="row" data-cap="feedback_tone">
       <label>Feedback tones</label>
       <label class="switch"><input type="checkbox" data-toggle="feedback_tone"><span></span></label>
     </div>
-    <div class="row">
+    <div class="row" data-cap="volume_boost">
       <label>Volume boost</label>
       <label class="switch"><input type="checkbox" data-toggle="volume_boost"><span></span></label>
     </div>
-    <div class="row">
+    <div class="row" data-cap="lock_panel">
       <label>Lock top panel</label>
       <label class="switch"><input type="checkbox" data-toggle="lock_panel"><span></span></label>
     </div>
-    <div class="row">
+    <div class="row" data-cap="rename">
       <input type="text" id="name" maxlength="16" placeholder="Speaker name">
       <button id="rename">Rename</button>
     </div>
     <div class="row">
       <button data-act="refresh">Refresh</button>
-      <button id="poweroff" class="danger">Power off</button>
+      <button id="poweroff" class="danger" data-cap="power_off">Power off</button>
     </div>
   </section>
 
@@ -189,6 +248,7 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 let snap = { status: "disconnected", state: {}, devices: [] };
 let meta = { light_patterns: {} };
 let dragging = false;
+let pausedUntil = 0, autoKey = "", adapterKey = "";
 
 async function api(path, body) {
   const r = await fetch(path, { method: body === undefined ? "GET" : "POST",
@@ -206,28 +266,59 @@ function toast(e) {
 
 function render() {
   const s = snap.state || {}, connected = snap.status === "connected";
-  $("#status").textContent = snap.status; $("#status").className = "pill " + snap.status;
+  const status = snap.pairing ? "pairing" : snap.status === "disconnected" && snap.reconnecting ? "connecting" : snap.status;
+  $("#status").textContent = status; $("#status").className = "pill " + (status === "pairing" ? "connecting" : status);
+  renderBluetooth();
+  const caps = snap.capabilities || {};
+  $$("[data-cap]").forEach((el) => (el.hidden = caps[el.dataset.cap] === false));
   $("#title").textContent = s.name || "PartyBox";
-  $("#disconnect").hidden = !snap.address || snap.status === "disconnected";
+  $("#disconnect").hidden = snap.status !== "connected";
+  $("#scan").disabled = !!snap.scanning;
+  $("#scan").textContent = snap.scanning ? "Scanning…" : "Scan";
+  renderAutoconnect();
+  pausedUntil = Date.now() + (snap.auto_paused || 0) * 1000;
+  renderPaused();
   $$(".ctl").forEach((el) => el.classList.toggle("disabled", !connected));
 
   const list = $("#devices");
-  const devs = [...snap.devices];
-  if (snap.address && !devs.some((d) => d.address === snap.address))
-    devs.unshift({ address: snap.address, name: s.name || snap.address, rssi: null });
-  list.innerHTML = devs.length ? "" : '<div class="empty">No speakers found yet. Make sure the speaker is on and not connected to the JBL app.</div>';
-  for (const d of devs) {
-    const active = d.address === snap.address && snap.status !== "disconnected";
+  list.innerHTML = snap.devices.length ? "" : '<div class="empty">No speakers yet. Make sure the speaker is on and not connected to the JBL app, then press Scan.</div>';
+  for (const d of snap.devices) {
+    const current = d.address === snap.address;
+    const active = current && snap.status === "connected";
+    const busy = current && (snap.status === "connecting" || (snap.status === "disconnected" && snap.reconnecting));
     const el = document.createElement("div");
-    el.className = "device" + (active ? " active" : "");
-    el.innerHTML = `<div class="meta"><div class="name"></div><div class="sub"></div></div><button></button>`;
-    el.querySelector(".name").textContent = d.name;
-    el.querySelector(".sub").textContent = d.address + (d.rssi != null ? `  ·  ${d.rssi} dBm` : "");
-    const b = el.querySelector("button");
-    b.textContent = active ? snap.status : "Connect";
-    b.disabled = active;
-    if (!active) b.className = "primary";
-    b.onclick = () => api("api/connect", { address: d.address }).catch(toast);
+    el.className = "device" + (active || busy ? " active" : "");
+    el.innerHTML = `<div class="meta"><div class="name"><span></span></div><div class="sub"></div></div><div class="actions"></div>`;
+    el.querySelector(".name span").textContent = d.name;
+    if (d.address === snap.auto_target) addTag(el, "Auto-connect", "auto");
+    if (!d.known && d.paired) addTag(el, d.partybox ? "Paired" : "Paired, may not be a PartyBox");
+    const unpaired = !d.known && !d.paired;
+    if (unpaired) addTag(el, d.partybox ? "Not paired" : "Not paired, may not be a PartyBox");
+    const sub = [d.address];
+    if (d.rssi != null) sub.push(`nearby, ${d.rssi} dBm`);
+    if (d.last_connected) sub.push(`last used ${ago(d.last_connected)}`);
+    el.querySelector(".sub").textContent = sub.join("  ·  ");
+    const actions = el.querySelector(".actions");
+    if (d.known && !active && !busy) {
+      const f = document.createElement("button"); f.className = "link"; f.textContent = "Forget";
+      f.title = "Remove from this list. The speaker stays paired in Bluetooth.";
+      f.onclick = () => api("api/forget", { address: d.address }).catch(toast);
+      actions.appendChild(f);
+    }
+    const b = document.createElement("button");
+    if (active) { b.textContent = "Connected"; b.disabled = true; }
+    else if (busy) { b.textContent = "Cancel"; b.onclick = () => api("api/disconnect", {}).catch(toast); }
+    else if (unpaired) {
+      b.textContent = "Pair and connect"; b.className = "primary";
+      b.onclick = () => api("api/connect", { address: d.address, pair: true }).catch(toast);
+      if (d.ble) {  // reachable over BLE without pairing
+        const c = document.createElement("button"); c.textContent = "Connect";
+        c.onclick = () => api("api/connect", { address: d.address }).catch(toast);
+        actions.appendChild(c);
+      }
+    }
+    else { b.textContent = "Connect"; b.className = "primary"; b.onclick = () => api("api/connect", { address: d.address }).catch(toast); }
+    actions.appendChild(b);
     list.appendChild(el);
   }
 
@@ -250,6 +341,7 @@ function render() {
   $$("[data-toggle]").forEach((i) => (i.checked = !!s[i.dataset.toggle]));
 
   const info = [
+    ["Model", caps.model],
     ["Battery", s.ac_powered ? "AC power" : s.battery != null ? `${s.battery}%${s.charging ? " (charging)" : ""}` : null],
     ["Source", s.audio_source], ["Firmware", s.firmware], ["Product ID", s.product_id],
     ["Model ID", s.model_id], ["Serial", s.serial], ["MAC", s.mac || snap.address],
@@ -262,6 +354,55 @@ function render() {
     $("#info").append(dt, dd);
   }
   if (document.activeElement !== $("#name")) $("#name").value = s.name || "";
+}
+
+function addTag(el, text, cls) {
+  const t = document.createElement("span"); t.className = "tag " + (cls || ""); t.textContent = text;
+  el.querySelector(".name").appendChild(t);
+}
+
+function ago(t) {
+  const s = Date.now() / 1000 - t;
+  if (s < 3600) return "just now";
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} d ago`;
+}
+
+function renderBluetooth() {
+  const bt = snap.bluetooth || { adapters: [] };
+  $("#health").hidden = !bt.problem;
+  $("#healthmsg").textContent = bt.problem || "";
+  $("#healthfix").hidden = !bt.fix;
+  $("#scan").title = bt.problem || "";
+  const sel = $("#adapter");
+  const opts = [["", "Automatic"], ...bt.adapters.map((a) => [a.id, `${a.id}: ${a.name} (${a.address})${a.powered ? "" : ", off"}`])];
+  if (bt.selected && !bt.adapters.some((a) => a.id === bt.selected)) opts.push([bt.selected, `${bt.selected} (not plugged in)`]);
+  const key = JSON.stringify(opts);
+  if (key !== adapterKey) {
+    adapterKey = key;
+    sel.innerHTML = "";
+    for (const [v, label] of opts) sel.add(new Option(label, v));
+  }
+  sel.value = bt.selected || "";
+}
+
+function renderAutoconnect() {
+  const sel = $("#autoconnect");
+  const opts = [["last", "Last used speaker"], ...snap.devices.map((d) => [d.address, d.name]), ["off", "Off: only when I press Connect"]];
+  const key = JSON.stringify(opts);
+  if (key !== autoKey) {  // rebuilding would close the dropdown while it's open
+    autoKey = key;
+    sel.innerHTML = "";
+    for (const [v, label] of opts) sel.add(new Option(label, v));
+  }
+  sel.value = snap.autoconnect || "last";
+}
+
+function renderPaused() {
+  const left = Math.ceil((pausedUntil - Date.now()) / 1000);
+  const show = left > 0 && snap.status !== "connected";
+  $("#paused").hidden = !show;
+  if (show) $("#pausedmsg").textContent = `Auto-connect is paused while you choose a speaker. It resumes in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}.`;
 }
 
 function addLog(e) {
@@ -289,11 +430,17 @@ function connectWs() {
 
 // ---- Wiring ----
 $("#scan").onclick = async () => {
-  const b = $("#scan"); b.disabled = true; $("#scanmsg").textContent = "Scanning…";
-  try { const r = await api("api/scan", {}); $("#scanmsg").textContent = `${r.devices.length} found`; }
-  catch (e) { toast(e); $("#scanmsg").textContent = ""; }
-  b.disabled = false;
+  $("#scanmsg").textContent = "";
+  try { const r = await api("api/scan", {}); $("#scanmsg").textContent = `${r.devices.length} nearby`; }
+  catch (e) { toast(e); }
 };
+$("#autoconnect").onchange = (e) => api("api/autoconnect", { value: e.target.value }).catch(toast);
+$("#adapter").onchange = (e) => api("api/adapter", { adapter: e.target.value }).catch(toast);
+$("#healthfix").onclick = () => api("api/adapter/power", { adapter: snap.bluetooth.fix }).catch(toast);
+$("#opensettings").onclick = () => $("#settings").showModal();
+$("#closesettings").onclick = () => $("#settings").close();
+$("#resume").onclick = () => api("api/autoconnect/resume", {}).catch(toast);
+setInterval(renderPaused, 1000);
 $("#disconnect").onclick = () => api("api/disconnect", {}).catch(toast);
 $$("[data-act]").forEach((b) => (b.onclick = () => act(b.dataset.act)));
 $("#playpause").onclick = () => act(snap.state.player_status === "playing" ? "pause" : "play");

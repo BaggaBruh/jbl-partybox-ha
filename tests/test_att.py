@@ -6,6 +6,8 @@ import tempfile
 import uuid
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fastclock  # noqa: E402,F401
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "jbl_partybox" / "app"))
 import att  # noqa: E402
 import bluez  # noqa: E402
@@ -108,7 +110,7 @@ async def no_diag(a):
 
 
 async def main():
-    server_sock = None
+    server_sock = server_task = None
 
     def factory():
         nonlocal server_sock
@@ -116,7 +118,8 @@ async def main():
         a.setblocking(False)
         b.setblocking(False)
         server_sock = b
-        asyncio.get_event_loop().create_task(fake_server(b))
+        nonlocal server_task
+        server_task = asyncio.get_event_loop().create_task(fake_server(b))
         return a
 
     orig_open = att.AttLink.open
@@ -126,7 +129,7 @@ async def main():
 
     att.AttLink.open = open_without_connect
     orig_init = att.AttLink.__init__
-    att.AttLink.__init__ = lambda self, d, c: orig_init(self, d, c, sock_factory=factory)
+    att.AttLink.__init__ = lambda self, d, c, on_event=None: orig_init(self, d, c, sock_factory=factory, on_event=on_event)
     speaker.BleakClient, speaker.BleakScanner = FakeBleak, FakeScanner
     bluez.device_info = bluez.dump_device = no_diag
 
@@ -134,16 +137,22 @@ async def main():
     await m.connect("12:34:56:78:9A:BC")
     await asyncio.sleep(1.5)
     print("1) status", m.status, "transport", m.transport, "volume", m.state.get("volume"))
+    assert m.status == "connected" and m.transport == "att", (m.status, m.transport)
     await m.action("volume", 26)
     await asyncio.sleep(0.6)
     print("2) volume after set", m.state.get("volume"), "| saved", speaker.STATE_FILE.read_text())
+    assert m.state.get("volume") == 26, m.state
+    assert m.known["12:34:56:78:9A:BC"]["transport"] == "att", m.known
+    server_task.cancel()
+    await asyncio.sleep(0)  # let the fake speaker stop reading before its socket closes
     server_sock.close()  # speaker drops the link
     await asyncio.sleep(0.3)
     print("3) after drop", m.status)
+    assert m.status == "disconnected", m.status
     await m.disconnect()
     for e in list(m.log)[:14]:
         if e["dir"] != "tx" and e["dir"] != "rx":
             print("  ", e["dir"], e["hex"], e["note"])
 
 
-asyncio.run(main())
+fastclock.run(main())

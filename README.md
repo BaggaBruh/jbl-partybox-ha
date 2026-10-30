@@ -6,7 +6,8 @@
 
 **Control a JBL PartyBox speaker from Home Assistant over Bluetooth, no phone app needed.**
 
-![Version](https://img.shields.io/badge/version-1.0.0-ff6b00)
+[![Tests](https://github.com/BaggaBruh/jbl-partybox-ha/actions/workflows/tests.yml/badge.svg)](https://github.com/BaggaBruh/jbl-partybox-ha/actions/workflows/tests.yml)
+![Version](https://img.shields.io/badge/version-1.2.0-ff6b00)
 ![Home Assistant app](https://img.shields.io/badge/Home%20Assistant-app-41BDF5?logo=homeassistant&logoColor=white)
 ![MQTT discovery](https://img.shields.io/badge/MQTT-discovery-660066?logo=mqtt&logoColor=white)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)
@@ -29,7 +30,10 @@
 - ⚙️ **Speaker settings**: feedback tones, volume boost, top-panel lock, rename, power off
 - 🏠 **Automations**: 22 MQTT-discovered entities, credentials picked up from the Mosquitto app
 - 🔁 **Stays connected**: reconnects in about 5–10 s after drop-outs, power cycles and restarts
-- 🐞 **Debug console**: every frame sent and received, plus a raw-frame sender
+- 🔀 **Speaker selection**: pair from the panel, remembered speakers, a choice of auto-connect
+  speaker and Bluetooth adapter
+- 🧩 **Model aware**: only offers the controls your speaker reports, with a health check for Bluetooth
+- 🐞 **Debug console**: every frame sent and received, a raw-frame sender and a scrubbed diagnostics download
 
 The protocol was reverse engineered from the official JBL PartyBox Android app (3.14.20);
 see [PROTOCOL.md](PROTOCOL.md). Not affiliated with or endorsed by JBL/Harman.
@@ -58,7 +62,8 @@ host (for example through the **Samba share** app's `addons` share), then App st
 ## Use
 
 1. Close the JBL PartyBox app on your phone (the speaker allows one control connection).
-2. Open **PartyBox** in the sidebar → **Scan** → **Connect**.
+2. Open **PartyBox** in the sidebar → **Scan** → **Connect**, or **Pair and connect** for a speaker
+   in pairing mode.
 
 The speaker is remembered and reconnected automatically. See [DOCS.md](jbl_partybox/DOCS.md)
 for options and troubleshooting.
@@ -124,7 +129,6 @@ Home Assistant's side first. [PROTOCOL.md](PROTOCOL.md) has the details.
 
 | Option | Default | |
 |---|---|---|
-| `auto_connect` | `true` | Reconnect to the last speaker automatically |
 | `heartbeat_interval` | `5` | Seconds between keep-alive packets (the speaker may override this) |
 | `scan_timeout` | `8` | Seconds per scan |
 | `mqtt_discovery` | `true` | Publish the speaker to Home Assistant over MQTT |
@@ -148,7 +152,7 @@ Home Assistant's side first. [PROTOCOL.md](PROTOCOL.md) has the details.
 ```bash
 pip install -r requirements-dev.txt
 python tools/mock_server.py --demo     # UI against a simulated speaker on http://localhost:8099
-python tests/test_relink.py            # simulation tests print their own results
+python tests/run_all.py                # all simulation tests, on a simulated clock (a few seconds)
 python tools/ble_test.py scan          # talk to a real speaker over BLE with bleak
 ```
 

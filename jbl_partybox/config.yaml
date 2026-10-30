@@ -1,5 +1,5 @@
 name: JBL PartyBox
-version: "1.0.0"
+version: "1.2.0"
 slug: jbl_partybox
 url: https://github.com/BaggaBruh/jbl-partybox-ha
 description: Control JBL PartyBox speakers over Bluetooth
@@ -18,13 +18,12 @@ host_network: true
 services:
   - mqtt:want
 options:
-  auto_connect: true
   heartbeat_interval: 5
   scan_timeout: 8
   mqtt_discovery: true
   discovery_prefix: homeassistant
 schema:
-  auto_connect: bool
+  auto_connect: bool?
   heartbeat_interval: int(1,60)
   scan_timeout: int(3,30)
   mqtt_discovery: bool

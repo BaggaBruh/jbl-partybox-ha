@@ -6,6 +6,26 @@ Frames are `AA <cmd> <len> <payload>`. Writes go to TX, replies arrive as notifi
 SERVICE_UUID = "65786365-6c70-6f69-6e74-2e636f6d0000"
 RX_UUID = "65786365-6c70-6f69-6e74-2e636f6d0001"
 TX_UUID = "65786365-6c70-6f69-6e74-2e636f6d0002"
+# Feature-info tokens for the controls this app offers (DeviceSupportFeatureInfo)
+FEATURE_TOKENS = {0xA3: "eq", 0xA5: "feedback_tone", 0xAD: "volume_boost", 0xAE: "lock_panel"}
+
+# Product id -> (model, supports power off, supports rename), from the app's ProductListConfig.json
+PRODUCTS = {
+    "1f61": ("PartyBox 710", True, True),
+    "1f5f": ("PartyBox 110", True, True),
+    "1f5d": ("PartyBox 310", False, True),
+    "2063": ("PartyBox Encore Essential", True, False),
+    "2062": ("PartyBox Encore", True, False),
+    "20dd": ("PartyBox Stage 320", True, True),
+    "20e2": ("PartyBox Club 120", True, True),
+    "2118": ("PartyBox Encore 2", True, True),
+    "2120": ("PartyBox 520", True, True),
+    "212e": ("PartyBox Encore Essential 2", True, True),
+    "2156": ("PartyBox 720", True, True),
+    "215b": ("PartyBox On-The-Go 2", True, True),
+    "2095": ("PartyBox Ultimate", True, True),
+}
+
 ADV_SERVICE_UUIDS = {
     "0000fddf-0000-1000-8000-00805f9b34fb",  # PartyBox
     "0000dffd-0000-1000-8000-00805f9b34fb",  # Pro / Ultimate
@@ -25,6 +45,8 @@ REQ_PLAYER_INFO = 0x41
 RESP_PLAYER_INFO = 0x42
 SET_PLAYER_INFO = 0x43
 REQ_BASS_BOOST = 0x61
+REQ_FEATURE_INFO = 0xA1
+RET_FEATURE_INFO = 0xA2
 RET_BASS_BOOST = 0x62
 SET_BASS_BOOST = 0x63
 REQ_SIMPLE_EQ = 0x91
@@ -93,6 +115,10 @@ def _token_cmd(cmd, token, value, dev_idx=0):
 
 
 # ---- Requests ----
+
+def req_feature_info():
+    return frame(REQ_FEATURE_INFO)
+
 
 def req_device_info():
     return frame(REQ_DEV_INFO)
@@ -297,12 +323,44 @@ def parse_simple_eq(payload):
     }
 
 
+def parse_feature_info(payload):
+    """payload = <token> <len> <value> repeated, with no device index (ReqDevFeatureInfoCommand)."""
+    features = {}
+    i = 0
+    while i + 1 < len(payload):
+        tok, ln = payload[i], payload[i + 1]
+        val = payload[i + 2:i + 2 + ln]
+        i += 2 + ln
+        if tok in FEATURE_TOKENS and val:
+            features[FEATURE_TOKENS[tok]] = val[0] == 1
+    return {"features": features}
+
+
+def product_info(product_id):
+    """The model table entry for a device-info product id, in either byte order."""
+    pid = (product_id or "").lower()
+    return PRODUCTS.get(pid) or PRODUCTS.get(pid[2:4] + pid[0:2])
+
+
+def capabilities(state):
+    """Which optional controls to offer. A control only goes away on evidence that it's unsupported."""
+    caps = {name: True for name in ("eq", "feedback_tone", "volume_boost", "lock_panel", "rename", "power_off")}
+    product = product_info(state.get("product_id"))
+    if product:
+        caps["power_off"], caps["rename"] = product[1], product[2]
+    caps.update(state.get("features") or {})
+    caps["model"] = product[0] if product else None
+    return caps
+
+
 def parse_frame(cmd, payload):
     """Returns a dict of state updates (possibly empty) plus '_ack' / '_heartbeat_s' meta keys."""
     if cmd == RESP_PLAYER_INFO:
         return parse_player_info(payload)
     if cmd == RESP_DEV_INFO:
         return parse_device_info(payload)
+    if cmd == RET_FEATURE_INFO:
+        return parse_feature_info(payload)
     if cmd == RET_BASS_BOOST and payload:
         return {"bass_boost": payload[0]}
     if cmd == RET_SIMPLE_EQ:
