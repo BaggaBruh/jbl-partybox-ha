@@ -91,7 +91,7 @@ async def fake_paired(_uuids):
     ]
 
 
-async def fake_relink(_address, timeout=30.0):
+async def fake_relink(_address, timeout=30.0, block=False):
     await asyncio.sleep(0.5)
 
 
@@ -118,7 +118,7 @@ async def fake_powered(_adapter, on=True):
     return None
 
 
-async def fake_connect(self, address, ble_fallback=True):
+async def fake_connect(self, address, ble_fallback=True, prefer_att=False):
     self.address, self.status, self.state = address, "connecting", {}
     await self._emit_state()
     await asyncio.sleep(0.5)

@@ -1,5 +1,5 @@
 name: JBL PartyBox
-version: "1.2.0"
+version: "1.3.0"
 slug: jbl_partybox
 url: https://github.com/BaggaBruh/jbl-partybox-ha
 description: Control JBL PartyBox speakers over Bluetooth

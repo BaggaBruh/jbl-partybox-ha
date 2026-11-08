@@ -299,16 +299,30 @@ async def disconnect(address):
         bus.disconnect()
 
 
-async def relink(address, timeout=30.0):
+BLOCK_SECONDS = 2  # how long the speaker is kept out while the host takes the link
+BUSY_WAIT_SECONDS = 5  # how long to let a connect already in flight finish
+
+
+def _error(member, reply):
+    # BlueZ puts the actual reason (e.g. "br-connection-busy") in the message body
+    detail = reply.body[0] if reply.body and isinstance(reply.body[0], str) else ""
+    return f"{member}: {reply.error_name}" + (f" ({detail})" if detail else "")
+
+
+async def relink(address, timeout=30.0, block=False):
     """Drop the speaker's link and re-create it from the host side (Device1.Connect).
 
     Sessions on a link the speaker set up itself (auto-reconnect of audio) get our control
-    channel closed after a few seconds; on a host-initiated link it stays up. Returns None on
+    channel closed after a few seconds; on a host-initiated link it stays up. A trusted speaker
+    reconnects by itself within about a second of being dropped and then wins the race against
+    our Connect. With `block`, the speaker is blocked in BlueZ (pairing kept) for BLOCK_SECONDS so
+    its own reconnect is rejected, then unblocked right before our Connect. Returns None on
     success or an error string.
     """
     if MessageBus is None:
         return "BlueZ not available"
     bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    blocked = False
     try:
         path, props = await _find_device(bus, address)
         if path is None:
@@ -318,19 +332,52 @@ async def relink(address, timeout=30.0):
             reply = await asyncio.wait_for(bus.call(Message(
                 destination=BLUEZ, path=path, interface="org.bluez.Device1", member=member,
             )), timeout)
-            return None if reply.message_type != MessageType.ERROR else f"{member}: {reply.error_name}"
+            return None if reply.message_type != MessageType.ERROR else _error(member, reply)
 
-        if props.get("Connected"):
-            await call("Disconnect")
-            for _ in range(20):
+        async def set_blocked(on):
+            reply = await bus.call(Message(
+                destination=BLUEZ, path=path, interface="org.freedesktop.DBus.Properties", member="Set",
+                signature="ssv", body=["org.bluez.Device1", "Blocked", Variant("b", on)],
+            ))
+            return None if reply.message_type != MessageType.ERROR else _error("Blocked", reply)
+
+        async def wait_connected(want, seconds):
+            for _ in range(int(seconds / 0.25)):
+                _, now = await _find_device(bus, address)
+                if bool(now and now.get("Connected")) == want:
+                    return True
                 await asyncio.sleep(0.25)
-                _, props = await _find_device(bus, address)
-                if not props or not props.get("Connected"):
-                    break
+            return False
+
+        if props.get("Blocked"):  # left over from an interrupted relink
+            await set_blocked(False)
+        if block:
+            err = await set_blocked(True)  # also drops the speaker's current link
+            if err:
+                return err
+            blocked = True
+            await wait_connected(False, 5)
+            await asyncio.sleep(BLOCK_SECONDS)
+            blocked = bool(await set_blocked(False))
+        elif props.get("Connected"):
+            await call("Disconnect")
+            await wait_connected(False, 5)
             await asyncio.sleep(1)
         err = await call("Connect")
+        if err and ("InProgress" in err or "busy" in err):
+            # Something (usually the speaker itself) is already connecting; let it finish so the
+            # next attempt starts from a settled link instead of colliding with it again.
+            await wait_connected(True, BUSY_WAIT_SECONDS)
         return None if err is None or "AlreadyConnected" in err else err
     except asyncio.TimeoutError:
         return "timed out"
     finally:
+        if blocked:  # never leave the speaker blocked, also when cancelled
+            try:
+                await asyncio.wait_for(bus.call(Message(
+                    destination=BLUEZ, path=path, interface="org.freedesktop.DBus.Properties", member="Set",
+                    signature="ssv", body=["org.bluez.Device1", "Blocked", Variant("b", False)],
+                )), 3)
+            except Exception:
+                pass
         bus.disconnect()

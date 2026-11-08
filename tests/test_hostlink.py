@@ -60,7 +60,7 @@ def run(autolink, off_for=20, startup=False):
         audio = w["audio_at"] is not None and time.monotonic() >= w["audio_at"]
         return {"connected": w["link"] is not None, "audio": w["link"] is not None and audio, "has_a2dp": True}
 
-    async def relink(a, timeout=30.0):
+    async def relink(a, timeout=30.0, block=False):
         log.append((round(t_on(), 1), "relink"))
         w["link"] = None
         if not w["on"] or t_on() < 2.5:

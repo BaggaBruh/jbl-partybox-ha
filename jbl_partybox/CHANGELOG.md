@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.0
+
+- **Faster reconnects when the speaker reconnects itself first:** after Home Assistant loses the
+  race twice, the speaker is blocked in Bluetooth for 2 s (its pairing is kept), so the host can
+  take the link. It's always unblocked afterwards, also if the app stops halfway.
+- **Connect** in the panel does the same when the speaker beats it to the link.
+- **Connect** in the panel now always sets up the classic link from Home Assistant for speakers
+  with Bluetooth audio, then uses it, instead of trying BLE first.
+- One successful BLE connection no longer makes the app prefer BLE for a speaker that needs classic
+  Bluetooth. Before, this made Connect fail with `br-connection-unknown`.
+- A connect that's already in progress is allowed to finish instead of being retried at once.
+- No more BLE fallback attempts while the speaker is linked, which can't succeed and cost ~8 s.
+- The debug log shows BlueZ's full reason when a re-link fails, such as `br-connection-busy`.
+
 ## 1.2.0
 
 - **Pair from the panel:** Scan also finds speakers in pairing mode, and **Pair and connect** pairs

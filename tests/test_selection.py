@@ -21,7 +21,7 @@ paging_aborted = []
 page_seconds = 0.0
 
 
-async def relink(_address, timeout=30.0):
+async def relink(_address, timeout=30.0, block=False):
     await asyncio.sleep(page_seconds)
 
 
@@ -56,7 +56,7 @@ bluez.pair, bluez.cancel_pairing, bluez.paired_devices = pair, cancel_pairing, n
 class FakeManager(speaker.SpeakerManager):
     connects = ()
 
-    async def connect(self, address, ble_fallback=True):
+    async def connect(self, address, ble_fallback=True, prefer_att=False):
         self.connects = (*self.connects, address)
         self.status = "connecting"
         await asyncio.sleep(0.01)

@@ -7,7 +7,7 @@
 **Control a JBL PartyBox speaker from Home Assistant over Bluetooth, no phone app needed.**
 
 [![Tests](https://github.com/BaggaBruh/jbl-partybox-ha/actions/workflows/tests.yml/badge.svg)](https://github.com/BaggaBruh/jbl-partybox-ha/actions/workflows/tests.yml)
-![Version](https://img.shields.io/badge/version-1.2.0-ff6b00)
+![Version](https://img.shields.io/badge/version-1.3.0-ff6b00)
 ![Home Assistant app](https://img.shields.io/badge/Home%20Assistant-app-41BDF5?logo=homeassistant&logoColor=white)
 ![MQTT discovery](https://img.shields.io/badge/MQTT-discovery-660066?logo=mqtt&logoColor=white)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)

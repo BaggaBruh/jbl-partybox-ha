@@ -23,6 +23,7 @@ AUDIO_WAIT_SECONDS = 10  # how long to wait for the speaker's audio link after r
 PAGE_RETRY_SECONDS = 1  # gap between host connect attempts while the speaker is off (each takes ~5 s)
 RELINK_TIMEOUT_SECONDS = 12  # a host connect to a speaker that's off otherwise hangs ~30 s
 FALLBACK_EVERY = 6  # every Nth failed attempt is a plain connect (incl. BLE) instead
+BLOCK_AFTER = 2  # lost races against the speaker's own reconnect before blocking it briefly
 WATCHDOG_SECONDS = 30  # silence before probing the speaker; twice this and the link is dropped
 AUTO_HOLD_SECONDS = 120  # auto-connect stays paused this long after a scan or failed manual connect
 BACK_TO_TARGET_SECONDS = 60  # retry a dropped speaker this long, then return to the auto-connect speaker
@@ -291,14 +292,23 @@ class SpeakerManager:
                 await self.refresh_paired()
             # Same rule as the reconnect loop: the speaker only keeps our channel on a host-made link
             st = await _safe(bluez.link_state(address))
-            if isinstance(st, dict) and (st["connected"] or self.known.get(address, {}).get("transport") == "att"):
+            relinked = False
+            # Any speaker that offers audio over classic Bluetooth gets a host-made link first;
+            # waiting until it's linked or remembered as "att" let a one-off BLE session decide.
+            if isinstance(st, dict) and (st["connected"] or st["has_a2dp"]
+                                         or self.known.get(address, {}).get("transport") == "att"):
                 err = await self._relink(address)
+                if err and st["connected"]:
+                    # Lost the race against the speaker's own reconnect; take the link by blocking it
+                    await self._log("info", b"", f"re-linking speaker from the host: {err}; blocking it for a moment")
+                    err = await self._relink(address, block=True)
                 if err:
                     await self._log("info", b"", f"re-linking speaker from the host: {err}")
                 else:
+                    relinked = True
                     await self._wait_for_audio(AUDIO_WAIT_SECONDS)
                     await asyncio.sleep(SETTLE_SECONDS)
-            await self.connect(address)
+            await self.connect(address, prefer_att=relinked)
             if self.status != "connected":
                 raise BleakError("the speaker dropped the connection right away")
         except Exception as e:
@@ -312,14 +322,17 @@ class SpeakerManager:
         await self.refresh_paired()
         await self._emit_state()
 
-    async def _relink(self, address):
+    async def _relink(self, address, block=False):
         self._paging = address
         try:
+            if block:
+                return await _safe(bluez.relink(address, timeout=RELINK_TIMEOUT_SECONDS, block=True))
             return await _safe(bluez.relink(address, timeout=RELINK_TIMEOUT_SECONDS))
         finally:
             self._paging = None
 
-    async def connect(self, address, ble_fallback=True):
+    async def connect(self, address, ble_fallback=True, prefer_att=False):
+        """prefer_att: the host just (re)created the classic link, so use it rather than BLE."""
         if self._link_up():
             if self.address == address:
                 return
@@ -331,7 +344,7 @@ class SpeakerManager:
         await self._emit_state()
         try:
             opened = False
-            if (self.known.get(address) or self._load_last()).get("transport") == "att":
+            if prefer_att or (self.known.get(address) or self._load_last()).get("transport") == "att":
                 try:
                     await self._open_att(address)
                     opened = True
@@ -563,7 +576,7 @@ class SpeakerManager:
         # immediately when the speaker links itself, otherwise by paging it every few seconds.
         # Every Nth failure also tries a plain connect, in case BlueZ can't be driven at all.
         started = next_page = time.monotonic()
-        failures = 0
+        failures = races = 0  # races: re-links lost in a row while the speaker held a link of its own
         while not self._user_disconnect and self.status != "connected":
             await asyncio.sleep(POLL_SECONDS)
             if self.status == "connecting":
@@ -577,21 +590,29 @@ class SpeakerManager:
             linked = isinstance(st, dict) and st["connected"]
             if not linked and time.monotonic() < next_page:
                 continue
-            if failures % FALLBACK_EVERY == FALLBACK_EVERY - 1:
+            # A direct connect can't win while the speaker holds a link of its own (BLE finds no
+            # GATT and the speaker drops the channel), so it's only a fallback when it's unlinked.
+            if not linked and failures % FALLBACK_EVERY == FALLBACK_EVERY - 1:
                 await self._log("info", b"", "host re-link keeps failing; trying a direct connect")
             else:
-                err = await self._relink(self.address)
+                block = linked and races >= BLOCK_AFTER
+                if block:
+                    await self._log("info", b"", "the speaker keeps reconnecting first; blocking it for a moment")
+                err = await self._relink(self.address, block=block)
                 if err:
                     failures += 1
+                    races = races + 1 if linked else 0
                     next_page = time.monotonic() + PAGE_RETRY_SECONDS
                     if linked or failures == 1:
                         await self._log("info", b"", f"re-linking speaker from the host: {err}")
                     continue
+                races = 0
                 await self._log("info", b"", "re-linked speaker from the host")
                 await self._wait_for_audio(AUDIO_WAIT_SECONDS)
                 await asyncio.sleep(SETTLE_SECONDS)
             try:
-                await self.connect(self.address, ble_fallback=failures % FALLBACK_EVERY == FALLBACK_EVERY - 1)
+                direct = not linked and failures % FALLBACK_EVERY == FALLBACK_EVERY - 1
+                await self.connect(self.address, ble_fallback=direct, prefer_att=not direct)
                 if self.status == "connected":
                     return
                 # Dropped while connect() was still sending its initial queries; the drop handler
@@ -757,6 +778,10 @@ class SpeakerManager:
 
     def _save_last(self, address, transport):
         self._last = address
+        if transport == "gatt" and self.known.get(address, {}).get("transport") == "att":
+            # A speaker that needed classic Bluetooth once will again whenever HA is its audio
+            # source; a lucky BLE session mustn't make every later connect try BLE first.
+            transport = "att"
         self.known[address] = {
             "name": self.device_name(address), "transport": transport, "last_connected": time.time(),
         }

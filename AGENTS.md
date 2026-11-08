@@ -36,8 +36,9 @@ discovery for automations. It's in daily use on the owner's HA OS install with t
 
 ## How a connection works (hard-won; don't undo without new evidence)
 
-1. **Transport order.** A speaker remembered with transport "att" tries classic Bluetooth first,
-   with BLE only as a fallback. Any other speaker tries BLE (bleak) first. On the tested speaker
+1. **Transport order.** Right after a host re-link (`prefer_att`), or for a speaker remembered
+   with transport "att", classic Bluetooth comes first, with BLE only as a fallback. Otherwise BLE
+   (bleak) comes first. "att" is never downgraded to "gatt" by one lucky BLE session. On the tested speaker
    BLE never works in practice: HA's host is connected to it over classic Bluetooth for A2DP audio,
    bleak sees "already connected" and finds no GATT services (`NoGattError`), which triggers step 2.
 2. **GATT over classic Bluetooth** (`att.AttLink`): L2CAP SEQPACKET to PSM 31, discover
@@ -49,7 +50,11 @@ discovery for automations. It's in daily use on the owner's HA OS install with t
    created by the host (`Device1.Connect`) it stays up. Therefore the reconnect loop always
    re-creates the link from the host (`bluez.relink`), waits for the A2DP transport
    (`MediaTransport1`), settles 1 s, then opens ATT. Startup auto-connect uses the same path, and
-   `_manual_connect` re-links first when the speaker is already linked or remembered as "att".
+   `_manual_connect` re-links first when the speaker is linked, offers A2DP or is remembered as "att".
+   A trusted speaker reconnects itself within about a second of being dropped and wins that race
+   (`Error.Failed`, `br-connection-busy`). After `BLOCK_AFTER` lost races `bluez.relink(block=True)`
+   blocks the speaker for `BLOCK_SECONDS`, unblocks it and connects at once. The speaker must never
+   stay blocked: `relink` unblocks in `finally` and also clears a leftover block before starting.
 4. The speaker may send ATT *requests* to us on the same channel; `AttLink` must answer them
    (and only treat response opcodes as replies to its own requests).
 5. Watchdog: 30 s of silence → probe with `AA 41 00`; 60 s → drop and reconnect.
@@ -134,11 +139,17 @@ Dead ends already tried: SPP/RFCOMM (speaker answers `FAIL`), removing the devic
 
 Last updated for version 1.2.0. Keep this short, and free of personal details.
 
-- **Released:** 1.2.0 is the latest release. The next version is 1.3.0.
+- **Released:** 1.2.0 is the latest GitHub release. 1.3.0 (the reconnect race fix) is pushed but
+  not released. The next version is 1.4.0.
+- **Known speaker state:** after days of uptime the tested speaker once stopped answering on L2CAP
+  PSM 31 (`Errno 110`, ATT requests timing out mid-discovery) while pairing and the classic link
+  still worked. Re-pairing didn't help; a hard reset of the speaker did. Don't add automatic
+  unpairing for this.
 - **Hardware:** only one PartyBox model has been tested. The owner reported that 1.2.0 looks good on
   it, without saying which features were tried. So treat these as unproven on hardware until someone
   confirms them: pairing, adapter selection, classic Bluetooth scanning, aborting a BlueZ connect,
   and the `AA A2` feature report (whose reply format is known only from the decompiled app).
+  The 1.3.0 block-and-connect step against the speaker's own reconnect is also untested.
 - **Decided against for now:** adding the Encore 2 AI and On-The-Go 2 AI to the model table, and
   publishing the model list below in the user docs.
 
