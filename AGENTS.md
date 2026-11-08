@@ -137,10 +137,9 @@ Dead ends already tried: SPP/RFCOMM (speaker answers `FAIL`), removing the devic
 
 ## Project status
 
-Last updated for version 1.2.0. Keep this short, and free of personal details.
+Last updated for version 1.3.0. Keep this short, and free of personal details.
 
-- **Released:** 1.2.0 is the latest GitHub release. 1.3.0 (the reconnect race fix) is pushed but
-  not released. The next version is 1.4.0.
+- **Released:** 1.3.0 (the reconnect race fix) is the latest release. The next version is 1.4.0.
 - **Known speaker state:** after days of uptime the tested speaker once stopped answering on L2CAP
   PSM 31 (`Errno 110`, ATT requests timing out mid-discovery) while pairing and the classic link
   still worked. Re-pairing didn't help; a hard reset of the speaker did. Don't add automatic
